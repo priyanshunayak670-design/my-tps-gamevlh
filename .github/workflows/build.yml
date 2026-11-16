@@ -1,0 +1,61 @@
+name: Build Godot 4 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Game Zip from Google Drive
+        run: |
+          pip install -q gdown
+          gdown "1eh3frhuq6TRtSpUEAg_JBR1ZN9y4djG0" -O game.zip
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Godot 4.3 & Export Templates
+        run: |
+          wget -q https://github.com
+          unzip -q Godot_v4.3-stable_linux.x86_64.zip
+          sudo mv Godot_v4.3-stable_linux.x86_64 /usr/local/bin/godot
+          mkdir -p ~/.local/share/godot/export_templates/4.3.stable
+          wget -q https://github.com
+          unzip -q Godot_v4.3-stable_export_templates.tpz -d temp_templates
+          mv temp_templates/templates/* ~/.local/share/godot/export_templates/4.3.stable/
+
+      - name: Setup Android SDK & Keystore
+        run: |
+          mkdir -p ~/android-sdk/cmdline-tools
+          wget -q https://google.com
+          unzip -q commandlinetools-linux-11076708_latest.zip -d ~/android-sdk/cmdline-tools
+          mv ~/android-sdk/cmdline-tools/cmdline-tools ~/android-sdk/cmdline-tools/latest
+          yes | ~/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
+          ~/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34" > /dev/null
+          keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android -keystore ~/debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -validity 9999
+          mkdir -p ~/.config/godot
+          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\nexport/android/android_sdk_path = "%s/android-sdk"\nexport/android/debug_keystore = "%s/debug.keystore"\nexport/android/debug_keystore_user = "androiddebugkey"\nexport/android/debug_keystore_pass = "android"\n' "$HOME" "$HOME" > ~/.config/godot/editor_settings-4.3.tres
+
+      - name: Export APK
+        run: |
+          mkdir -p game_src
+          unzip -q game.zip -d game_src
+          PROJECT_DIR=$(dirname $(find game_src -name "project.godot" | head -n 1))
+          cd "$PROJECT_DIR"
+          if [ ! -f export_presets.cfg ]; then
+            printf '[preset.0]\nname="Android"\nplatform="Android"\nrunnable=true\nexport_filter="all_resources"\ninclude_filter=""\nexclude_filter=""\n\n[preset.0.options]\npackage/unique_name="com.example.tpsdemo"\npackage/name="TPS Demo"\nkeystore/debug="%s/debug.keystore"\nkeystore/debug_user="androiddebugkey"\nkeystore/debug_password="android"\n' "$HOME" > export_presets.cfg
+          fi
+          godot --headless --import
+          godot --headless --export-debug "Android" "$GITHUB_WORKSPACE/TPS_Demo_Game.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TPS_Demo_Game_APK
+          path: TPS_Demo_Game.apk
